@@ -12,6 +12,9 @@
 > - **画面方向**：用 `AVCaptureDevice.RotationCoordinator` 求角度（对齐到 90° 的整数倍），预览层与 `AVCaptureVideoDataOutput` 用同一个角度，Vision（`.up`）、AprilTag 亮度面、检测框映射全链路自动一致；内参矩阵按实际旋转角度换算，算不出来时退回 FOV 估算（HUD 会显示"FOV 估算"）。
 > - **采集格式可调**：4K / 1080p / 720p / 480p × 24/30/60fps，只列出设备真实支持（且支持 420f）的组合；切换走 `.inputPriority` + `activeFormat`，内参的视场角同步更新。
 > - **画面填满 / 适配**：`.resizeAspectFill`（裁切）与 `.resizeAspect`（留黑边）可切换，检测框映射跟着一起换。
+> - **模型列表按开关过滤（v1.3.2）**：模型选择器换成列表 sheet（菜单分组在 iPad 上会因组标题重复
+>   而错行、重复、勾错位），火柴人关闭时只列检测模型 n/s/m/l/x，打开时只列 pose 模型；
+>   关闭开关会自动切回同名检测档位。
 > - **隐藏参数界面**：点画面或右上角眼睛按钮隐藏/显示 HUD 与控制面板，选择记在 `@AppStorage` 里。
 > - **火柴人模式（v1.3.0）**：打开开关会自动切到同名同档的 pose 模型（`yolo26m` → `yolo26m-pose`），
 >   overlay 按 COCO 17 点骨架画 19 根骨头 + 关节点，只画人体；pose 模型本身只输出 person 一类。

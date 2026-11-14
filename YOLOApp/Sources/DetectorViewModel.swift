@@ -134,18 +134,30 @@ final class DetectorViewModel: ObservableObject {
         camera.setRotationAngle(degrees)
     }
 
-    // MARK: - Stick figure
+    // MARK: - Model list / stick figure
+
+    /// The picker never mixes flavours: detection models when the skeleton toggle is off, pose models
+    /// when it is on.
+    var visibleModels: [ModelInfo] { models.filter { $0.isPose == stickFigure } }
+
+    var modelGroups: [ModelGroup] { ModelGroup.groups(of: visibleModels) }
 
     /// Turns stick-figure mode on/off. Pose models are the only ones that emit keypoints, so switching
-    /// the model is part of the toggle rather than a separate menu pick.
+    /// the model is part of the toggle rather than a separate pick.
     private func applyStickFigure() {
-        guard stickFigure, selectedModel?.isPose != true else { return }
-        if let pose = poseModel(matching: selectedModel) ?? models.first(where: { $0.isPose }) {
-            selectedModel = pose
-        } else {
-            stickFigure = false
-            errorMessage = "这个包里没有 pose 模型：构建时在 models 里加 yolo26n-pose 之类"
+        if stickFigure {
+            guard selectedModel?.isPose != true else { return }
+            if let pose = poseModel(matching: selectedModel) ?? models.first(where: { $0.isPose }) {
+                selectedModel = pose
+            } else {
+                stickFigure = false
+                errorMessage = "这个包里没有 pose 模型：构建时在 models 里加 yolo26n-pose 之类"
+            }
+            return
         }
+        // Switching off must not leave a pose model selected now that pose entries vanish from the list.
+        guard let current = selectedModel, current.isPose else { return }
+        selectedModel = models.first { $0.name == current.baseName } ?? models.first { !$0.isPose }
     }
 
     /// Same scale when bundled ("yolo26m" → "yolo26m-pose"), otherwise the fastest pose model available.

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel = DetectorViewModel()
     @State private var showBenchmark = false
+    @State private var showModelPicker = false
     /// Lets the preview go clean: tap the image (or the eye button) to bring the panels back.
     @AppStorage("showControls") private var showControls = true
     @AppStorage("previewFillMode") private var fillModeRaw = PreviewFillMode.fill.rawValue
@@ -42,11 +43,64 @@ struct ContentView: View {
                 eyeButton(in: geo.size, at: eye)
             }
             .animation(.easeInOut(duration: 0.18), value: showControls)
+            // Presenting from inside the geometry keeps this sheet on its own node: two `.sheet`
+            // modifiers on the same view are unreliable.
+            .sheet(isPresented: $showModelPicker) {
+                modelPicker
+            }
         }
         .onAppear { viewModel.start() }
         .sheet(isPresented: $showBenchmark) {
             BenchmarkView(viewModel: viewModel)
         }
+    }
+
+    /// A plain list instead of a `Menu`: a grouped menu with several sections mis-renders on iPad once
+    /// its group titles repeat (rows duplicate, the checkmark lands on the wrong row), and a list also
+    /// has room for each model's size and head type.
+    private var modelPicker: some View {
+        NavigationStack {
+            List {
+                ForEach(viewModel.modelGroups) { group in
+                    Section(group.title) {
+                        ForEach(group.models) { model in
+                            Button {
+                                viewModel.selectedModel = model
+                                showModelPicker = false
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(model.name).foregroundColor(.primary)
+                                        Text(model.footnote).font(.caption).foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if model == viewModel.selectedModel {
+                                        Image(systemName: "checkmark").foregroundColor(.accentColor)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                Section {
+                    Text(viewModel.stickFigure
+                         ? "火柴人模式：只列 pose 模型，输出人体 17 个关键点"
+                         : "检测模式：只列检测模型。打开「火柴人」开关后，这里换成 pose 模型")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("选择模型（\(viewModel.visibleModels.count)）")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showModelPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Preview
@@ -245,22 +299,8 @@ struct ContentView: View {
             }
 
             HStack {
-                Menu {
-                    ForEach(ModelGroup.groups(of: viewModel.models)) { group in
-                        Section(group.title) {
-                            ForEach(group.models) { model in
-                                Button {
-                                    viewModel.selectedModel = model
-                                } label: {
-                                    if model == viewModel.selectedModel {
-                                        Label(model.menuTitle, systemImage: "checkmark")
-                                    } else {
-                                        Text(model.menuTitle)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                Button {
+                    showModelPicker = true
                 } label: {
                     Label(viewModel.selectedModel?.name ?? "选择模型", systemImage: "cube.box")
                         .frame(maxWidth: .infinity)

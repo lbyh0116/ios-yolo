@@ -90,6 +90,12 @@ struct ModelInfo: Identifiable, Hashable {
 
     var menuTitle: String { String(format: "%@ · %.0f MB", name, Double(byteCount) / 1_048_576) }
 
+    /// Secondary line for the model picker: size plus what the head actually outputs.
+    var footnote: String {
+        let size = String(format: "%.1f MB", Double(byteCount) / 1_048_576)
+        return isPose ? "\(size) · 17 关键点（火柴人）" : "\(size) · 检测框"
+    }
+
     /// Compiled models shipped in `YOLOApp.app/Models`, grouped by family and ordered n, s, m, l, x.
     static func bundled() -> [ModelInfo] {
         guard let dir = Bundle.main.resourceURL?.appendingPathComponent("Models"),
@@ -118,7 +124,9 @@ struct ModelGroup: Identifiable {
     let title: String
     let models: [ModelInfo]
 
-    var id: String { title }
+    /// Detect and pose flavours of the same family carry different titles but can repeat once the
+    /// list is re-grouped, so identity is the title plus the first model instead of the title alone.
+    var id: String { title + "|" + (models.first?.name ?? "") }
 
     /// Consecutive models of the same family, as `bundled()` orders them.
     static func groups(of models: [ModelInfo]) -> [ModelGroup] {
