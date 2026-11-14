@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import CoreGraphics
 import CoreVideo
@@ -104,6 +105,30 @@ final class DetectorViewModel: ObservableObject {
     @Published private(set) var benchmarkResults: [BenchmarkResult] = []
     @Published private(set) var isBenchmarking = false
 
+    /// Back camera, published once the session has been configured (drives the rotation coordinator).
+    @Published private(set) var device: AVCaptureDevice?
+    /// Capture formats the current device can deliver, ordered 4K → 480p, fastest frame rate first.
+    @Published private(set) var formats: [CaptureFormatOption] = []
+    @Published private(set) var activeFormatID: String?
+
+    var activeFormat: CaptureFormatOption? { formats.first { $0.id == activeFormatID } }
+
+    var formatLabel: String {
+        guard let format = activeFormat else { return "格式" }
+        return "\(format.title) · \(Int(format.fps))fps"
+    }
+
+    /// Switches resolution / frame rate; the displayed label follows the camera's real state.
+    func selectFormat(_ option: CaptureFormatOption) {
+        activeFormatID = option.id
+        camera.selectFormat(option)
+    }
+
+    /// Called by the preview layer with the right-angle rotation it settled on.
+    func updateRotationAngle(_ degrees: CGFloat) {
+        camera.setRotationAngle(degrees)
+    }
+
     private let loadQueue = DispatchQueue(label: "yolo.model.load", qos: .userInitiated)
     private var loadGeneration = 0
     private var hasStarted = false
@@ -127,7 +152,14 @@ final class DetectorViewModel: ObservableObject {
 
     func start() {
         camera.start { [weak self] error in
-            if let error { self?.errorMessage = error }
+            guard let self else { return }
+            if let error {
+                self.errorMessage = error
+                return
+            }
+            self.device = self.camera.device
+            self.formats = self.camera.formats
+            self.activeFormatID = self.camera.activeFormatID
         }
         if !hasStarted {
             hasStarted = true

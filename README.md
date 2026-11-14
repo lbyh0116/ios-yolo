@@ -1,10 +1,19 @@
 # iOS YOLO26 实时检测
 
-在 iPhone（面向 iPhone 18 Pro / A20 Pro）上用相机实时运行 Ultralytics 最新的 **YOLO26** 目标检测模型，可在 **NPU（Apple Neural Engine）/ GPU / CPU / Auto** 之间即时切换，并内置三种计算单元的跑分对比。IPA 由 GitHub Actions 构建，不签名。
+在 iPhone / iPad（面向 iPhone 18 Pro / A20 Pro）上用相机实时运行 Ultralytics 最新的 **YOLO26** 目标检测模型，可在 **NPU（Apple Neural Engine）/ GPU / CPU / Auto** 之间即时切换，并内置三种计算单元的跑分对比。IPA 由 GitHub Actions 构建，不签名。
+
+> **本 fork（lbyh0116/ios-yolo）在 v1.2.0 起的改动**
+>
+> - **iPad 原生 + 任意窗口尺寸**：`TARGETED_DEVICE_FAMILY = 1,2`，去掉 `UIRequiresFullScreen`，支持四方向旋转与台前调度任意拉伸；宽窗口（≥700pt）自动把控制面板变成右侧栏，窄窗口保持底部面板。
+> - **画面方向**：用 `AVCaptureDevice.RotationCoordinator` 求角度（对齐到 90° 的整数倍），预览层与 `AVCaptureVideoDataOutput` 用同一个角度，Vision（`.up`）、AprilTag 亮度面、检测框映射全链路自动一致；内参矩阵按实际旋转角度换算，算不出来时退回 FOV 估算（HUD 会显示"FOV 估算"）。
+> - **采集格式可调**：4K / 1080p / 720p / 480p × 24/30/60fps，只列出设备真实支持（且支持 420f）的组合；切换走 `.inputPriority` + `activeFormat`，内参的视场角同步更新。
+> - **画面填满 / 适配**：`.resizeAspectFill`（裁切）与 `.resizeAspect`（留黑边）可切换，检测框映射跟着一起换。
+> - **隐藏参数界面**：点画面或右上角眼睛按钮隐藏/显示 HUD 与控制面板，选择记在 `@AppStorage` 里。
 
 ## 功能
 
-- 后置摄像头 1080p@60fps 实时检测，绘制检测框、类别与置信度
+- 后置摄像头 1080p@60fps 实时检测，绘制检测框、类别与置信度（分辨率与帧率可在界面里切换）
+
 - 计算单元切换（Core ML `MLComputeUnits`）：
   | 选项 | Core ML 设置 | 说明 |
   | --- | --- | --- |
