@@ -73,6 +73,14 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+      - name: Verify app bundle
+        run: |
+          APP=build/Build/Products/Release-iphoneos/YOLOApp.app
+          ls -la "$APP"
+          test -f "$APP/Assets.car" || { echo "::error::Assets.car missing — the asset catalog (app icon) did not compile"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons' "$APP/Info.plist" || echo "::warning::CFBundleIcons missing"
+          ls "$APP/Models" | sort
+
       - name: Package IPA
         run: |
           mkdir -p dist/Payload
