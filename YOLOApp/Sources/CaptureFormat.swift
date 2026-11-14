@@ -82,8 +82,13 @@ extension AVCaptureDevice.Format {
     var maxFrameRate: Double { videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0 }
     var minFrameRate: Double { videoSupportedFrameRateRanges.map(\.minFrameRate).min() ?? 0 }
 
-    /// The pixel format AprilTag reads its luma plane from must survive whatever resolution we pick.
+    /// AprilTag reads the luma plane of a 420 (NV12) frame, so only offer formats that deliver it.
+    /// `AVCaptureDevice.Format` exposes the codec through its format description, which is the only
+    /// supported way to ask this — there is no per-format pixel-format list.
+    var mediaSubType: FourCharCode { CMFormatDescriptionGetMediaSubType(formatDescription) }
+
     var supportsFullRange420: Bool {
-        supportedPixelFormatTypes.contains { ($0 as NSNumber).uint32Value == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange }
+        mediaSubType == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            || mediaSubType == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
     }
 }
