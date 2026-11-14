@@ -6,45 +6,42 @@ struct ContentView: View {
     /// Lets the preview go clean: tap the image (or the eye button) to bring the panels back.
     @AppStorage("showControls") private var showControls = true
     @AppStorage("previewFillMode") private var fillModeRaw = PreviewFillMode.fill.rawValue
+    /// Eye button position as fractions of the window, so it survives rotation and resizing.
+    @AppStorage("eyeX") private var storedEyeX = 0.95
+    @AppStorage("eyeY") private var storedEyeY = 0.06
+    /// Live position while dragging; only written back to storage when the finger lifts.
+    @State private var draggingEye: CGPoint?
 
     private var fillMode: PreviewFillMode { PreviewFillMode(rawValue: fillModeRaw) ?? .fill }
 
     var body: some View {
         GeometryReader { geo in
-            // Wide window (iPad landscape, or any wide resizable window) puts the controls in a side
-            // column so the preview keeps its full height instead of being covered.
-            let sideColumn = geo.size.width >= 700
+            let landscape = geo.size.width > geo.size.height
+            // Landscape keeps the phone look but shrinks the card so it never covers the whole frame.
+            let panelWidth: CGFloat = landscape
+                ? min(max(geo.size.width * 0.38, 340), 460)
+                : geo.size.width - 24
+            let eye = eyePoint(in: geo.size)
+            // The card goes to whichever side the eye button is not on, so they can't overlap.
+            let panelOnRight = eye.x < geo.size.width / 2
+
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                if sideColumn {
-                    HStack(spacing: 0) {
-                        previewArea
-                        if showControls {
-                            sidePanel
-                                .frame(width: min(max(geo.size.width * 0.28, 320), 420))
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
-                } else {
-                    previewArea
-                    if showControls {
-                        VStack {
-                            Spacer(minLength: 0)
-                            bottomPanel
-                        }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                preview
+                    .ignoresSafeArea()
+
+                if showControls {
+                    if landscape {
+                        floatingCluster(width: panelWidth, onRight: panelOnRight)
+                    } else {
+                        phoneChrome
                     }
                 }
 
-                if viewModel.isLoading {
-                    ProgressView("正在加载模型…\n首次在 NPU 上加载需要编译，可能需要数秒")
-                        .multilineTextAlignment(.center)
-                        .padding(20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                }
+                eyeButton(in: geo.size, at: eye)
             }
-            .animation(.easeInOut(duration: 0.22), value: showControls)
+            .animation(.easeInOut(duration: 0.18), value: showControls)
         }
         .onAppear { viewModel.start() }
         .sheet(isPresented: $showBenchmark) {
@@ -52,72 +49,102 @@ struct ContentView: View {
         }
     }
 
-    private var previewArea: some View {
-        ZStack(alignment: .top) {
-            Group {
-                CameraPreview(
-                    session: viewModel.camera.session,
-                    device: viewModel.device,
-                    fillMode: fillMode,
-                    onRotationAngle: { viewModel.updateRotationAngle($0) }
-                )
-                DetectionOverlay(
-                    detections: viewModel.detections,
-                    tags: viewModel.tags,
-                    imageSize: viewModel.imageSize,
-                    fillMode: fillMode
-                )
-            }
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.22)) { showControls.toggle() }
-            }
+    // MARK: - Preview
 
-            if showControls {
-                VStack {
-                    statsHUD.padding(.horizontal, 12).padding(.top, 8)
-                    Spacer(minLength: 0)
-                }
+    private var preview: some View {
+        ZStack {
+            CameraPreview(
+                session: viewModel.camera.session,
+                device: viewModel.device,
+                fillMode: fillMode,
+                onRotationAngle: { viewModel.updateRotationAngle($0) }
+            )
+            DetectionOverlay(
+                detections: viewModel.detections,
+                tags: viewModel.tags,
+                imageSize: viewModel.imageSize,
+                fillMode: fillMode
+            )
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.18)) { showControls.toggle() }
+        }
+    }
+
+    /// Portrait / squarish windows: exactly the phone layout — HUD on top, card across the bottom.
+    private var phoneChrome: some View {
+        VStack(spacing: 0) {
+            statsHUD
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
                 .allowsHitTesting(false)
-            }
-
-            HStack {
-                Spacer()
-                toggleButton.padding(.trailing, 12).padding(.top, 8)
-            }
+            Spacer(minLength: 0)
+            controlsPanel
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
         }
     }
 
-    private var toggleButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.22)) { showControls.toggle() }
-        } label: {
-            Image(systemName: showControls ? "eye.slash" : "eye")
-                .font(.system(size: 13, weight: .semibold))
-                .padding(9)
-                .background(.ultraThinMaterial, in: Circle())
+    /// Landscape: HUD and card share one width and sit together in the corner opposite the eye button.
+    private func floatingCluster(width: CGFloat, onRight: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            statsHUD
+                .allowsHitTesting(false)
+            controlsPanel
         }
-        .buttonStyle(.plain)
-        .opacity(showControls ? 0.5 : 0.75)
-        .accessibilityLabel(showControls ? "隐藏参数界面" : "显示参数界面")
+        .frame(width: width, alignment: .leading)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: onRight ? .bottomTrailing : .bottomLeading)
     }
 
-    private var bottomPanel: some View {
+    private var controlsPanel: some View {
         controlsContent
             .padding(12)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
     }
 
-    private var sidePanel: some View {
-        ScrollView {
-            controlsContent
-                .padding(14)
-        }
-        .background(.ultraThinMaterial)
+    // MARK: - Eye button
+
+    private func eyePoint(in size: CGSize) -> CGPoint {
+        let fraction = draggingEye ?? CGPoint(x: storedEyeX, y: storedEyeY)
+        return CGPoint(
+            x: min(max(fraction.x, 0.04), 0.96) * size.width,
+            y: min(max(fraction.y, 0.04), 0.96) * size.height
+        )
     }
+
+    private func eyeButton(in size: CGSize, at point: CGPoint) -> some View {
+        Image(systemName: showControls ? "eye.slash" : "eye")
+            .font(.system(size: 13, weight: .semibold))
+            .padding(9)
+            .background(.ultraThinMaterial, in: Circle())
+            .contentShape(Circle())
+            .opacity(showControls ? 0.55 : 0.85)
+            .position(point)
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.18)) { showControls.toggle() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { value in
+                        draggingEye = CGPoint(
+                            x: min(max(value.location.x / size.width, 0.04), 0.96),
+                            y: min(max(value.location.y / size.height, 0.04), 0.96)
+                        )
+                    }
+                    .onEnded { _ in
+                        if let dragged = draggingEye {
+                            storedEyeX = dragged.x
+                            storedEyeY = dragged.y
+                        }
+                        draggingEye = nil
+                    }
+            )
+            .accessibilityLabel(showControls ? "隐藏参数界面" : "显示参数界面")
+    }
+
+    // MARK: - HUD
 
     private var statsHUD: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -154,8 +181,8 @@ struct ContentView: View {
             }
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .padding(.top, 8)
     }
 
     private func metric(_ title: String, _ value: String) -> some View {
@@ -165,6 +192,8 @@ struct ContentView: View {
         }
         .font(.caption)
     }
+
+    // MARK: - Controls
 
     private var controlsContent: some View {
         VStack(spacing: 12) {
@@ -248,7 +277,7 @@ struct ContentView: View {
             }
 
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) { showControls = false }
+                withAnimation(.easeInOut(duration: 0.18)) { showControls = false }
             } label: {
                 Label("隐藏参数界面", systemImage: "eye.slash")
                     .font(.caption)

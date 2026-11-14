@@ -4,7 +4,11 @@
 
 > **本 fork（lbyh0116/ios-yolo）在 v1.2.0 起的改动**
 >
-> - **iPad 原生 + 任意窗口尺寸**：`TARGETED_DEVICE_FAMILY = 1,2`，去掉 `UIRequiresFullScreen`，支持四方向旋转与台前调度任意拉伸；宽窗口（≥700pt）自动把控制面板变成右侧栏，窄窗口保持底部面板。
+> - **iPad 原生 + 任意窗口尺寸**：`TARGETED_DEVICE_FAMILY = 1,2`，去掉 `UIRequiresFullScreen`，支持四方向旋转与台前调度任意拉伸。
+>   竖屏/接近方形的窗口完全等同手机布局（顶部 HUD + 底部整宽卡片）；横屏不再切侧栏，改为**左下或右下角悬浮卡片**
+>   （宽度取窗口 38%，340–460pt），同宽的 HUD 紧贴在卡片上方一起悬浮，卡片自动放到"眼睛按钮"的对面一侧。
+> - **眼睛按钮可拖动**：图标可在画面任意位置拖动，位置以窗口比例存进 `@AppStorage`，旋转/改窗口大小都不丢。
+> - **缩放不卡顿**：窗口缩放期间不再切换视图层级；旋转角改成"几何稳定 0.25 秒后再应用"，避免每帧重启采集管线。
 > - **画面方向**：用 `AVCaptureDevice.RotationCoordinator` 求角度（对齐到 90° 的整数倍），预览层与 `AVCaptureVideoDataOutput` 用同一个角度，Vision（`.up`）、AprilTag 亮度面、检测框映射全链路自动一致；内参矩阵按实际旋转角度换算，算不出来时退回 FOV 估算（HUD 会显示"FOV 估算"）。
 > - **采集格式可调**：4K / 1080p / 720p / 480p × 24/30/60fps，只列出设备真实支持（且支持 420f）的组合；切换走 `.inputPriority` + `activeFormat`，内参的视场角同步更新。
 > - **画面填满 / 适配**：`.resizeAspectFill`（裁切）与 `.resizeAspect`（留黑边）可切换，检测框映射跟着一起换。

@@ -32,10 +32,12 @@ struct CameraPreview: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        uiView.previewLayer.videoGravity = fillMode.gravity
+        if uiView.previewLayer.videoGravity != fillMode.gravity {
+            uiView.previewLayer.videoGravity = fillMode.gravity
+        }
         uiView.onRotationAngle = onRotationAngle
         uiView.device = device
-        uiView.syncRotation()
+        uiView.scheduleRotationSync()
     }
 
     final class PreviewView: UIView {
@@ -56,15 +58,26 @@ struct CameraPreview: UIViewRepresentable {
 
         private var coordinator: AVCaptureDevice.RotationCoordinator?
         private var lastAngle: CGFloat = -1
+        private var pendingSync: DispatchWorkItem?
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            syncRotation()
+            scheduleRotationSync()
         }
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            syncRotation()
+            scheduleRotationSync()
+        }
+
+        /// Resizing fires `layoutSubviews` dozens of times per second, and every rotation change
+        /// restarts the capture pipeline — which is exactly the hiccup you see when a window grows or
+        /// shrinks. So the angle is applied only after the geometry has been stable for 0.25 s.
+        func scheduleRotationSync() {
+            pendingSync?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.syncRotation() }
+            pendingSync = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
         }
 
         /// Keeps the preview and the delivered frames at the same right-angle rotation.
@@ -81,7 +94,9 @@ struct CameraPreview: UIViewRepresentable {
             let snapped = (coordinator.videoRotationAngleForHorizonLevelPreview / 90).rounded() * 90
             guard snapped != lastAngle else { return }
             lastAngle = snapped
-            if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(snapped) {
+            if let connection = previewLayer.connection,
+               connection.isVideoRotationAngleSupported(snapped),
+               connection.videoRotationAngle != snapped {
                 connection.videoRotationAngle = snapped
             }
             onRotationAngle?(snapped)
