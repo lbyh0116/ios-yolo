@@ -8,8 +8,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "3"
 
 targets:
   YOLOApp:
@@ -29,7 +29,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.iosyolo.app
         PRODUCT_NAME: YOLOApp
-        TARGETED_DEVICE_FAMILY: "1"
+        # 1 = iPhone, 2 = iPad. iPad runs it natively (and in a resizable window) rather than scaled.
+        TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
         ENABLE_PREVIEWS: YES
         SWIFT_OBJC_BRIDGING_HEADER: YOLOApp/Sources/YOLOApp-Bridging-Header.h
@@ -43,12 +44,19 @@ targets:
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: 需要使用相机进行实时目标检测
         UILaunchScreen: {}
-        UIRequiresFullScreen: true
         UIStatusBarHidden: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # No UIRequiresFullScreen: on iPad that forces full screen and blocks Stage Manager resizing.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIRequiredDeviceCapabilities:
           - arm64
     scheme: {}

@@ -1,12 +1,24 @@
 import SwiftUI
 
-/// Maps normalized frame coordinates onto a `.resizeAspectFill` preview of that frame.
-struct AspectFillMapping {
+/// Maps normalized frame coordinates onto the preview of that frame.
+struct PreviewMapping {
+    enum Mode {
+        case fill
+        case fit
+    }
+
     private let shown: CGSize
     private let origin: CGPoint
 
-    init(imageSize: CGSize, viewSize: CGSize) {
-        let scale = max(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+    init(imageSize: CGSize, viewSize: CGSize, mode: Mode) {
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            shown = .zero
+            origin = .zero
+            return
+        }
+        let horizontal = viewSize.width / imageSize.width
+        let vertical = viewSize.height / imageSize.height
+        let scale = mode == .fill ? max(horizontal, vertical) : min(horizontal, vertical)
         shown = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         origin = CGPoint(x: (viewSize.width - shown.width) / 2, y: (viewSize.height - shown.height) / 2)
     }
@@ -20,16 +32,17 @@ struct AspectFillMapping {
     }
 }
 
-/// Draws YOLO boxes and AprilTag poses over a `.resizeAspectFill` camera preview of the same frame.
+/// Draws YOLO boxes and AprilTag poses over the camera preview of the same frame.
 struct DetectionOverlay: View {
     let detections: [Detection]
     let tags: [TagOverlay]
     let imageSize: CGSize
+    let fillMode: PreviewFillMode
 
     var body: some View {
         Canvas { context, size in
             guard imageSize.width > 0, imageSize.height > 0 else { return }
-            let mapping = AspectFillMapping(imageSize: imageSize, viewSize: size)
+            let mapping = PreviewMapping(imageSize: imageSize, viewSize: size, mode: fillMode == .fill ? .fill : .fit)
 
             for detection in detections {
                 let rect = mapping.rect(detection.rect)
@@ -48,7 +61,7 @@ struct DetectionOverlay: View {
 
     private static let axisColors: [(name: String, color: Color)] = [("X", .red), ("Y", .green), ("Z", .blue)]
 
-    private func drawTag(_ tag: TagOverlay, mapping: AspectFillMapping, in context: inout GraphicsContext) {
+    private func drawTag(_ tag: TagOverlay, mapping: PreviewMapping, in context: inout GraphicsContext) {
         var layer = context
         layer.opacity = tag.isStale ? 0.35 : 1
 
