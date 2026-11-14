@@ -120,10 +120,8 @@ struct ContentView: View {
                 fillMode: fillMode
             )
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.18)) { showControls.toggle() }
-        }
+        // Deliberately no tap-to-toggle here: the HUD is hidden only through the eye button, so a
+        // stray touch on the image can't wipe the readout mid-measurement.
     }
 
     /// Portrait / squarish windows: exactly the phone layout — HUD on top, card across the bottom.

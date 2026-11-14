@@ -8,8 +8,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.3.2"
-    CURRENT_PROJECT_VERSION: "6"
+    MARKETING_VERSION: "1.3.3"
+    CURRENT_PROJECT_VERSION: "7"
 
 targets:
   YOLOApp:
@@ -17,6 +17,8 @@ targets:
     platform: iOS
     sources:
       - path: YOLOApp/Sources
+      # Asset catalog: the app icon lives here as a single 1024px image.
+      - path: YOLOApp/Resources
       # AprilTag 3 C library (BSD-2), tag36h11 only; see ThirdParty/apriltag/VERSION.txt
       - path: ThirdParty/apriltag
         excludes: ["*.md", "*.txt"]
@@ -35,6 +37,7 @@ targets:
         ENABLE_PREVIEWS: YES
         SWIFT_OBJC_BRIDGING_HEADER: YOLOApp/Sources/YOLOApp-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(SRCROOT)/ThirdParty/apriltag
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: YOLOApp/Info.plist
       properties:
