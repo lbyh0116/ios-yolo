@@ -94,6 +94,11 @@ final class DetectorViewModel: ObservableObject {
         }
     }
 
+    /// Stick-figure mode: switches to a pose model so the overlay can draw skeletons.
+    @Published var stickFigure = false {
+        didSet { if stickFigure != oldValue { applyStickFigure() } }
+    }
+
     @Published private(set) var detections: [Detection] = []
     @Published private(set) var tags: [TagOverlay] = []
     @Published private(set) var imageSize = CGSize(width: 1080, height: 1920)
@@ -127,6 +132,28 @@ final class DetectorViewModel: ObservableObject {
     /// Called by the preview layer with the right-angle rotation it settled on.
     func updateRotationAngle(_ degrees: CGFloat) {
         camera.setRotationAngle(degrees)
+    }
+
+    // MARK: - Stick figure
+
+    /// Turns stick-figure mode on/off. Pose models are the only ones that emit keypoints, so switching
+    /// the model is part of the toggle rather than a separate menu pick.
+    private func applyStickFigure() {
+        guard stickFigure, selectedModel?.isPose != true else { return }
+        if let pose = poseModel(matching: selectedModel) ?? models.first(where: { $0.isPose }) {
+            selectedModel = pose
+        } else {
+            stickFigure = false
+            errorMessage = "这个包里没有 pose 模型：构建时在 models 里加 yolo26n-pose 之类"
+        }
+    }
+
+    /// Same scale when bundled ("yolo26m" → "yolo26m-pose"), otherwise the fastest pose model available.
+    private func poseModel(matching current: ModelInfo?) -> ModelInfo? {
+        guard let current else { return nil }
+        if let exact = models.first(where: { $0.name == current.baseName + "-pose" }) { return exact }
+        guard let scale = current.scale else { return nil }
+        return models.first { $0.isPose && $0.scale == scale }
     }
 
     private let loadQueue = DispatchQueue(label: "yolo.model.load", qos: .userInitiated)

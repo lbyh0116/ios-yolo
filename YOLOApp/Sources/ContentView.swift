@@ -280,6 +280,20 @@ struct ContentView: View {
                 .font(.caption.monospacedDigit())
                 .frame(width: 36)
         }
+
+        Toggle(isOn: $viewModel.stickFigure) {
+            Label("火柴人（只追踪人体）", systemImage: "figure.walk")
+                .font(.caption)
+        }
+        .toggleStyle(.switch)
+
+        if viewModel.stickFigure {
+            Text(viewModel.selectedModel?.isPose == true
+                 ? "pose 模型只输出人体 17 个关键点，画骨架不画其他类别"
+                 : "当前模型没有关键点输出，换个 pose 模型才会出骨架")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
     }
 
     @ViewBuilder

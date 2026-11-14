@@ -32,12 +32,19 @@ struct PreviewMapping {
     }
 }
 
-/// Draws YOLO boxes and AprilTag poses over the camera preview of the same frame.
+/// Draws YOLO boxes, stick-figure skeletons and AprilTag poses over the camera preview of the same frame.
 struct DetectionOverlay: View {
     let detections: [Detection]
     let tags: [TagOverlay]
     let imageSize: CGSize
     let fillMode: PreviewFillMode
+
+    /// COCO 17-keypoint skeleton, in the order Ultralytics' pose heads emit them.
+    private static let skeletonEdges: [(Int, Int)] = [
+        (0, 1), (0, 2), (1, 2), (1, 3), (2, 4),
+        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+        (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
+    ]
 
     var body: some View {
         Canvas { context, size in
@@ -47,9 +54,17 @@ struct DetectionOverlay: View {
             for detection in detections {
                 let rect = mapping.rect(detection.rect)
                 let color = Color.forClass(detection.classIndex)
-                context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(color), lineWidth: 2.5)
-                let label = "\(detection.label) \(Int(detection.confidence * 100))%"
-                drawLabel(label, at: CGPoint(x: rect.minX, y: rect.minY), above: true, color: color, in: &context)
+                if let keypoints = detection.keypoints {
+                    // Stick-figure mode: the box only anchors the figure, the skeleton carries the signal.
+                    context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(color.opacity(0.35)), lineWidth: 1.5)
+                    drawSkeleton(keypoints, mapping: mapping, color: color, in: &context)
+                    let label = "\(detection.label) \(Int(detection.confidence * 100))%"
+                    drawLabel(label, at: CGPoint(x: rect.minX, y: rect.minY), above: true, color: color.opacity(0.85), in: &context)
+                } else {
+                    context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(color), lineWidth: 2.5)
+                    let label = "\(detection.label) \(Int(detection.confidence * 100))%"
+                    drawLabel(label, at: CGPoint(x: rect.minX, y: rect.minY), above: true, color: color, in: &context)
+                }
             }
 
             for tag in tags {
@@ -60,6 +75,28 @@ struct DetectionOverlay: View {
     }
 
     private static let axisColors: [(name: String, color: Color)] = [("X", .red), ("Y", .green), ("Z", .blue)]
+
+    /// Draws the 19 skeleton bones plus a dot per visible keypoint; low-confidence points are skipped
+    /// so occluded limbs don't flicker across the screen.
+    private func drawSkeleton(_ keypoints: [Keypoint], mapping: PreviewMapping, color: Color, in context: inout GraphicsContext) {
+        let threshold: Float = 0.35
+        let points: [CGPoint?] = keypoints.map { keypoint in
+            keypoint.confidence >= threshold ? mapping.point(keypoint.point) : nil
+        }
+
+        for (from, to) in Self.skeletonEdges {
+            guard from < points.count, to < points.count, let start = points[from], let end = points[to] else { continue }
+            var bone = Path()
+            bone.move(to: start)
+            bone.addLine(to: end)
+            context.stroke(bone, with: .color(color), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+        }
+
+        for point in points.compactMap({ $0 }) {
+            let dot = CGRect(x: point.x - 2.5, y: point.y - 2.5, width: 5, height: 5)
+            context.fill(Path(ellipseIn: dot), with: .color(.white))
+        }
+    }
 
     private func drawTag(_ tag: TagOverlay, mapping: PreviewMapping, in context: inout GraphicsContext) {
         var layer = context

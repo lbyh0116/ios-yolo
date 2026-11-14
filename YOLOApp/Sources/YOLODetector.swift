@@ -42,12 +42,20 @@ enum ComputeMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// One COCO body keypoint, normalized to the input image, top-left origin.
+struct Keypoint {
+    let point: CGPoint
+    let confidence: Float
+}
+
 struct Detection {
     let classIndex: Int
     let label: String
     let confidence: Float
     /// Normalized to the input image, top-left origin.
     let rect: CGRect
+    /// 17 COCO keypoints for pose models; nil for plain detection models.
+    var keypoints: [Keypoint]? = nil
 }
 
 struct ModelInfo: Identifiable, Hashable {
@@ -60,17 +68,24 @@ struct ModelInfo: Identifiable, Hashable {
 
     private static let scales: [Character] = ["n", "s", "m", "l", "x"]
 
+    /// Ultralytics pose checkpoints carry a "-pose" suffix, e.g. "yolo26n-pose".
+    var isPose: Bool { name.lowercased().hasSuffix("-pose") }
+
+    /// Name without the pose suffix, so scale and family parsing work for both flavours.
+    var baseName: String { isPose ? String(name.dropLast(5)) : name }
+
     /// Size suffix of Ultralytics names ("yolov8l" → "l"); nil for other names such as "best".
     var scale: Character? {
-        guard name.lowercased().hasPrefix("yolo"), let last = name.last, Self.scales.contains(last) else { return nil }
+        guard baseName.lowercased().hasPrefix("yolo"), let last = baseName.last, Self.scales.contains(last) else { return nil }
         return last
     }
 
     /// "yolov8l" → "yolov8"; names without a scale are their own family.
-    var family: String { scale == nil ? name : String(name.dropLast()) }
+    var family: String { scale == nil ? baseName : String(baseName.dropLast()) }
 
     var familyTitle: String {
-        family.lowercased().hasPrefix("yolo") ? "YOLO" + family.dropFirst(4) : family
+        let title = family.lowercased().hasPrefix("yolo") ? "YOLO" + family.dropFirst(4) : family
+        return isPose ? title + " pose" : title
     }
 
     var menuTitle: String { String(format: "%@ · %.0f MB", name, Double(byteCount) / 1_048_576) }
@@ -249,13 +264,86 @@ final class YOLODetector {
 
         return array.withUnsafeBytes { raw -> [Detection] in
             let tensor = Tensor(raw: raw, type: array.dataType, s1: strides[1], s2: strides[2])
-            if shape[2] == 6 || shape[2] == 7 {
+            // The last axis is the channel count for an end-to-end head and the anchor count for a
+            // raw head; 100 sits far below any anchor count and far above any channel count.
+            if shape[2] <= 100 {
+                let channels = shape[2]
+                if looksLikePose(channels: channels) {
+                    // NMS-free pose head: [1, maxDet, 4 + score (+ class) + 17 * 3]
+                    return decodePoseEndToEnd(tensor, count: shape[1], channels: channels, confidence: confidence)
+                }
                 // NMS-free end-to-end head (YOLO26 / YOLOv10): [1, maxDet, x1 y1 x2 y2 score class]
                 return decodeEndToEnd(tensor, count: shape[1], confidence: confidence)
             }
+            let channels = shape[1]
+            if looksLikePose(channels: channels) {
+                // Raw pose head: [1, 4 + score + 17 * 3, anchors]
+                return decodePoseRaw(tensor, channels: channels, anchors: shape[2], confidence: confidence, iouThreshold: iouThreshold)
+            }
             // Raw head (YOLO11 / YOLOv8): [1, 4 + classes, anchors] with cx cy w h + class scores
-            return decodeRaw(tensor, channels: shape[1], anchors: shape[2], confidence: confidence, iouThreshold: iouThreshold)
+            return decodeRaw(tensor, channels: channels, anchors: shape[2], confidence: confidence, iouThreshold: iouThreshold)
         }
+    }
+
+    /// Keypoints always end the channel axis, so their offset follows from the channel count: that
+    /// covers the 56-channel raw layout and the 57-channel end-to-end one (extra class column).
+    private func keypointOffset(channels: Int) -> Int { channels - Self.keypointCount * 3 }
+
+    private func decodePoseEndToEnd(_ t: Tensor, count: Int, channels: Int, confidence: Float) -> [Detection] {
+        let offset = keypointOffset(channels: channels)
+        var detections: [Detection] = []
+        for i in 0..<count {
+            let score = t[i, 4]
+            guard score >= confidence else { continue }
+            let x1 = CGFloat(t[i, 0]), y1 = CGFloat(t[i, 1]), x2 = CGFloat(t[i, 2]), y2 = CGFloat(t[i, 3])
+            let rect = CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
+            detections.append(makeDetection(rect: rect, score: score, cls: 0, keypoints: readKeypoints(t, row: i, offset: offset)))
+        }
+        return detections
+    }
+
+    private func decodePoseRaw(_ t: Tensor, channels: Int, anchors: Int, confidence: Float, iouThreshold: Float) -> [Detection] {
+        let offset = keypointOffset(channels: channels)
+        var candidates: [(rect: CGRect, score: Float, anchor: Int)] = []
+        for a in 0..<anchors {
+            let score = t[4, a]
+            guard score >= confidence else { continue }
+            let cx = CGFloat(t[0, a]), cy = CGFloat(t[1, a]), w = CGFloat(t[2, a]), h = CGFloat(t[3, a])
+            candidates.append((CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h), score, a))
+        }
+        candidates.sort { $0.score > $1.score }
+        if candidates.count > 3000 { candidates.removeLast(candidates.count - 3000) }
+
+        var kept: [(rect: CGRect, score: Float, anchor: Int)] = []
+        for candidate in candidates {
+            let overlaps = kept.contains { iou($0.rect, candidate.rect) > iouThreshold }
+            if !overlaps {
+                kept.append(candidate)
+                if kept.count >= 300 { break }
+            }
+        }
+        return kept.map { makeDetection(rect: $0.rect, score: $0.score, cls: 0, keypoints: readKeypoints(t, row: $0.anchor, offset: offset)) }
+    }
+
+    /// Reads 17 (x, y, confidence) triplets from one row of the channel axis.
+    private func readKeypoints(_ t: Tensor, row: Int, offset: Int) -> [Keypoint] {
+        var points: [Keypoint] = []
+        points.reserveCapacity(Self.keypointCount)
+        for k in 0..<Self.keypointCount {
+            let base = offset + k * 3
+            let x = CGFloat(t[row, base]) / inputSize.width
+            let y = CGFloat(t[row, base + 1]) / inputSize.height
+            points.append(Keypoint(point: CGPoint(x: x, y: y), confidence: t[row, base + 2]))
+        }
+        return points
+    }
+
+    private static let keypointCount = 17
+
+    /// A pose head carries 4 box + score (+ class) + 17 * 3 keypoint channels, i.e. 56–60 channels —
+    /// far below any real class count (COCO detect is 84), so range plus the "-pose" name is unambiguous.
+    private func looksLikePose(channels: Int) -> Bool {
+        info.isPose || (56...60).contains(channels)
     }
 
     private func decodeEndToEnd(_ t: Tensor, count: Int, confidence: Float) -> [Detection] {
@@ -305,7 +393,7 @@ final class YOLODetector {
         return kept.map { makeDetection(rect: $0.rect, score: $0.score, cls: $0.cls) }
     }
 
-    private func makeDetection(rect: CGRect, score: Float, cls: Int) -> Detection {
+    private func makeDetection(rect: CGRect, score: Float, cls: Int, keypoints: [Keypoint]? = nil) -> Detection {
         // Outputs are in model-input pixels; .scaleFill maps them linearly onto the full frame.
         let normalized = CGRect(
             x: rect.minX / inputSize.width,
@@ -313,8 +401,9 @@ final class YOLODetector {
             width: rect.width / inputSize.width,
             height: rect.height / inputSize.height
         ).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-        let label = classNames.indices.contains(cls) ? classNames[cls] : "class \(cls)"
-        return Detection(classIndex: cls, label: label, confidence: score, rect: normalized.isNull ? .zero : normalized)
+        // A pose head only ever sees people, so its label is fixed regardless of the class metadata.
+        let label = keypoints != nil ? "person" : (classNames.indices.contains(cls) ? classNames[cls] : "class \(cls)")
+        return Detection(classIndex: cls, label: label, confidence: score, rect: normalized.isNull ? .zero : normalized, keypoints: keypoints)
     }
 
     private func iou(_ a: CGRect, _ b: CGRect) -> Float {
