@@ -2,26 +2,85 @@
 
 在 iPhone / iPad（面向 iPhone 18 Pro / A20 Pro）上用相机实时运行 Ultralytics 最新的 **YOLO26** 目标检测模型，可在 **NPU（Apple Neural Engine）/ GPU / CPU / Auto** 之间即时切换，并内置三种计算单元的跑分对比。IPA 由 GitHub Actions 构建，不签名。
 
-> **本 fork（lbyh0116/ios-yolo）在 v1.2.0 起的改动**
->
-> - **iPad 原生 + 任意窗口尺寸**：`TARGETED_DEVICE_FAMILY = 1,2`，去掉 `UIRequiresFullScreen`，支持四方向旋转与台前调度任意拉伸。
->   竖屏/接近方形的窗口完全等同手机布局（顶部 HUD + 底部整宽卡片）；横屏不再切侧栏，改为**左下或右下角悬浮卡片**
->   （宽度取窗口 38%，340–460pt），同宽的 HUD 紧贴在卡片上方一起悬浮，卡片自动放到"眼睛按钮"的对面一侧。
-> - **眼睛按钮可拖动**：图标可在画面任意位置拖动，位置以窗口比例存进 `@AppStorage`，旋转/改窗口大小都不丢。
-> - **缩放不卡顿**：窗口缩放期间不再切换视图层级；旋转角改成"几何稳定 0.25 秒后再应用"，避免每帧重启采集管线。
-> - **画面方向**：用 `AVCaptureDevice.RotationCoordinator` 求角度（对齐到 90° 的整数倍），预览层与 `AVCaptureVideoDataOutput` 用同一个角度，Vision（`.up`）、AprilTag 亮度面、检测框映射全链路自动一致；内参矩阵按实际旋转角度换算，算不出来时退回 FOV 估算（HUD 会显示"FOV 估算"）。
-> - **采集格式可调**：4K / 1080p / 720p / 480p × 24/30/60fps，只列出设备真实支持（且支持 420f）的组合；切换走 `.inputPriority` + `activeFormat`，内参的视场角同步更新。
-> - **画面填满 / 适配**：`.resizeAspectFill`（裁切）与 `.resizeAspect`（留黑边）可切换，检测框映射跟着一起换。
-> - **模型列表按开关过滤（v1.3.2）**：模型选择器换成列表 sheet（菜单分组在 iPad 上会因组标题重复
->   而错行、重复、勾错位），火柴人关闭时只列检测模型 n/s/m/l/x，打开时只列 pose 模型；
->   关闭开关会自动切回同名检测档位。
-> - **隐藏参数界面**：只由眼睛按钮控制显隐（点画面不再隐藏，避免测量中误触），开关状态记在 `@AppStorage` 里。
-> - **App 图标（v1.3.3）**：`YOLOApp/Resources/Assets.xcassets/AppIcon` 单张 1024px，白底黑字 YOLO。
-> - **火柴人模式（v1.3.0）**：打开开关会自动切到同名同档的 pose 模型（`yolo26m` → `yolo26m-pose`），
->   overlay 按 COCO 17 点骨架画 19 根骨头 + 关节点，只画人体；pose 模型本身只输出 person 一类。
->   解码头按通道数分流：`[1,300,6]`/`[1,84,8400]` 是检测，`[1,300,56|57]`/`[1,56,8400]` 是关键点
->   （关键点固定占末尾 17×3 个通道，偏移由通道数推出来，所以 56 和 57 两种布局都能吃）。
-> - **模型档位（v1.3.0）**：CI 一次打包 YOLO26 n/s/m/l/x + pose n/m，fp16，IPA 约 275 MB。
+## 与原版（上游 `ZONGRUICHD-Rd/ios-yolo` v1.1.0）的差异
+
+本 fork 把外壳重做了一遍，目标是"拿 iPad 当主力演示/测量工具"。检测与位姿的算法骨架沿用原版，
+下面逐项对照最终版 **v1.3.3** 与原版的差别。
+
+| 能力 | 原版 v1.1.0 | 本版 v1.3.3 |
+| --- | --- | --- |
+| 设备支持 | 仅 iPhone（`TARGETED_DEVICE_FAMILY: "1"`） | iPhone + iPad 原生（`"1,2"`），iPad 上不再是以兼容模式放大的手机界面 |
+| 窗口 | `UIRequiresFullScreen: true`，只声明竖屏 | 允许任意窗口尺寸，台前调度可自由拉伸；iPhone 竖/横，iPad 四方向 |
+| 布局 | 顶部 HUD + 底部面板，按"永远全屏"设计 | 竖屏 / 近方形窗口 = 手机布局；横屏 = 左下或右下**角部悬浮卡片**（宽 38%，340–460pt）+ 同宽 HUD，整组落在眼睛按钮的对面一侧 |
+| 画面方向 | `videoRotationAngle` 硬编码 90，只有竖屏正确 | `RotationCoordinator` 求角度对齐 90°，预览层与 `AVCaptureVideoDataOutput` 同角；内参按角度换算，换算失败退回 FOV 估算并在 HUD 标出 |
+| 缩放流畅度 | 每次 `layoutSubviews` 都可能重启采集管线 | 几何稳定 0.25 s 后再应用角度，且只在角度真变时写 connection |
+| 采集格式 | 固定 1080p@60 | 4K / 1080p / 720p / 480p × 24/30/60，只列设备真实支持（含 420 格式）的组合，选择记忆 |
+| 预览填充 | 固定 `.resizeAspectFill` | 填满 / 适配 可切换，检测框映射同步切换 |
+| HUD 与面板显隐 | 常驻，无法隐藏 | 眼睛按钮可拖到画面任意位置（位置按窗口比例记忆）+ 面板内「隐藏参数界面」；点画面不再隐藏，避免测量中误触 |
+| 模型档位 | CI 默认 v8 + YOLO26 的 n/s/m/l 共 8 个 | YOLO26 n/s/m/l/x + pose n/m 共 7 个，fp16，IPA ≈ 243 MiB |
+| 人体骨骼 | 无 | **火柴人模式**：pose 模型 + COCO 17 点 / 19 根骨头，只画人体；打开开关自动切到同名同档 pose 模型 |
+| 模型选择器 | 分组 `Menu`（模型多时在 iPad 上会行重复、勾错位、点不动） | 列表 sheet，按任务过滤（关 = 检测 n/s/m/l/x，开 = pose），每行显示体积与输出类型 |
+| App 图标 | 无（系统默认格子） | 白底黑字 YOLO，单张 1024 px |
+| CI | 构建 + 上传 artifact + 可选 Release | 额外一步校验 `Assets.car`、`CFBundleIcons` 与打进包的模型清单，资源漏打包会直接失败 |
+| 版本 | `1.1.0`（build 2） | `1.3.3`（build 7） |
+
+### 设备与布局
+
+原版的 Info.plist 锁死 iPhone + 全屏 + 竖屏，在 iPad 上只能跑兼容模式；本版去掉 `UIRequiresFullScreen`
+（它会挡住台前调度拉伸），补上四个方向。布局刻意不做桌面式多栏：竖屏就是"大号手机"，横屏只把控制卡片
+缩成角落悬浮块，视频画面始终优先。视图层级不随宽度阈值切换，所以小窗 ↔ 全屏不会重建整棵树。
+
+### 相机与旋转
+
+原版把交付帧和预览层的旋转角都写死 90°，只对竖屏成立。本版用一个真源：`AVCaptureDevice.RotationCoordinator`
+同时驱动预览层与数据输出的 `videoRotationAngle`，于是 Vision（`.up`）、AprilTag 的亮度面、检测框映射
+三条链路自动一致，检测代码不受旋转影响。内参矩阵按 0/90/180/270 换算（原版只处理 90°），
+落在可疑范围时退回按视场角估算，HUD 会显示当前用的是哪条路径。
+
+采集格式从"预设 + 固定 60fps"改成按 `device.formats` 枚举（`CMFormatDescriptionGetMediaSubType`
+判 420f/420v，`AVCaptureDevice.Format` 没有 per-format 像素格式列表），切换走
+`sessionPreset = .inputPriority` + `activeFormat`，所以 4K 也能选；帧率用
+`videoSupportedFrameRateRanges` 过滤后再设。切换后同步刷新 `videoFieldOfView`，否则内参估算会偏。
+
+### 模型与解码
+
+`YOLODetector` 的解码头原来只认两种形状：端到端 `[1,300,6]` 和原始 `[1,84,8400]`。本版按**通道数**
+分成四条路径，其中关键点固定占末尾 17×3 个通道，偏移量由通道数推出，因此 `[1,300,57]`
+（端到端 pose，多一个 class 列）和 `[1,56,8400]`（原始 pose）都能解。检测与 pose 不会互相误判：
+COCO 检测是 84 通道，落在 pose 判定的 56–60 区间之外。
+
+火柴人模式复用原版已有的 overlay 架构，新增 COCO 骨架连线（19 条边），置信度低于 0.35 的关节点跳过，
+避免遮挡时线条乱飞。pose 头 `nc = 1`，天然只输出人体，所以"只追踪人体"不需要额外过滤。
+
+### 界面
+
+模型选择从 `Menu` 换成列表 sheet：分组菜单的 `ForEach` id 若取组标题，检测与 pose 同 family 时标题会重复，
+触发 SwiftUI 复用错行（表现就是行重复、勾出现在多行、点不动）。现在组 id = 标题 + 首个模型名，
+并且**同一个列表只出现一种任务**的模型；关闭火柴人时选中的 pose 模型会自动换回同名检测档位。
+
+### 构建
+
+CI 里 `xcodebuild -quiet` 会吞掉 actool 输出，图标漏打包也不会报错，所以加了 `Verify app bundle`
+步骤校验 `Assets.car`、`CFBundleIcons` 和 `Models/` 里的模型清单。发布仍然走
+`workflow_dispatch` + `release_tag`，IPA 未签名。
+
+### 文件级改动
+
+| 文件 | 状态 | 说明 |
+| --- | --- | --- |
+| `YOLOApp/Sources/CaptureFormat.swift` | 新增 | 采集格式枚举、分组、`maxFrameRate`/`minFrameRate`/420 格式判定 |
+| `YOLOApp/Sources/CameraManager.swift` | 重写 | 格式切换、角度同步、四角度内参换算 |
+| `YOLOApp/Sources/CameraPreview.swift` | 重写 | `PreviewFillMode`、`RotationCoordinator`、0.25 s debounce |
+| `YOLOApp/Sources/DetectionOverlay.swift` | 重写 | 填满/适配映射 + COCO 骨架绘制 |
+| `YOLOApp/Sources/ContentView.swift` | 重写 | 自适应布局、可拖动眼睛按钮、模型列表 sheet、格式菜单、火柴人开关 |
+| `YOLOApp/Sources/DetectorViewModel.swift` | 修改 | 设备/格式/角度发布、火柴人开关与模型自动切换、按开关过滤的模型清单 |
+| `YOLOApp/Sources/YOLODetector.swift` | 修改 | `Keypoint`、四条解码路径、pose 命名与分组、列表脚注 |
+| `YOLOApp/Resources/Assets.xcassets` | 新增 | App 图标（单张 1024 px） |
+| `project.yml` | 修改 | 设备族、方向、资源目录、`ASSETCATALOG_COMPILER_APPICON_NAME`、版本号 |
+| `.github/workflows/build-ipa.yml` | 修改 | 新增 `Verify app bundle` 校验步骤 |
+
+未改动：AprilTag 3 源码与 `AprilTagTracker.c`（位姿二义性消解 + One Euro 滤波）、`BenchmarkView`、
+`ComputePlanInspector`、检测头的端到端/原始解码主流程。
 
 ## 功能
 
@@ -34,7 +93,7 @@
   | GPU | `.cpuAndGPU` | Metal GPU（Core ML 没有"纯 GPU"选项，这是最接近的） |
   | CPU | `.cpuOnly` | 仅 CPU |
   | Auto | `.all` | 由系统调度 |
-- 模型切换：CI 默认打包 **YOLO26** 和 **YOLOv8** 的 n / s / m / l 共 8 个模型，菜单按系列分组并显示大小；置信度阈值可调
+- 模型切换：本版打包 **YOLO26** 的 n / s / m / l / x 与 pose 的 n / m（见上方差异表），列表按任务分组并显示体积与输出类型；置信度阈值可调
 - 实时显示 FPS、推理耗时、后处理耗时、目标数
 - **跑分对比**：依次在 NPU / GPU / CPU 上测 50 次推理的平均/中位/最快耗时，并用 `MLComputePlan`（iOS 17.4+）显示各设备实际承担的算子占比，验证模型确实跑在所选单元上
 - **AprilTag 追踪与 3D 坐标系**（tag36h11）：画出每个 Tag 的轮廓、ID 和轨迹，并按 ID 跨帧追踪（短暂丢失时保留 0.3 秒）。以每个 Tag 的**左上角**为原点建立右手坐标系：X 沿上边向右，Y 向上，Z 垂直指出 Tag（朝向相机），与 OpenCV/ArUco 的标记坐标系方向一致。实时显示原点在相机坐标系下的位置 (cm) 和距离
