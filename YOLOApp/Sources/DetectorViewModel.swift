@@ -134,6 +134,21 @@ final class DetectorViewModel: ObservableObject {
         camera.setRotationAngle(degrees)
     }
 
+    /// User-forced rotation: -1 = follow the window, otherwise a locked 0/90/180/270.
+    @Published var rotationOverride: Int = UserDefaults.standard.object(forKey: DetectorViewModel.rotationKey) as? Int ?? -1 {
+        didSet {
+            guard rotationOverride != oldValue else { return }
+            UserDefaults.standard.set(rotationOverride, forKey: DetectorViewModel.rotationKey)
+            if rotationOverride >= 0 {
+                camera.setRotationAngle(CGFloat(rotationOverride))
+            }
+        }
+    }
+
+    var forcedRotationAngle: CGFloat? { rotationOverride >= 0 ? CGFloat(rotationOverride) : nil }
+
+    private static let rotationKey = "rotationOverrideDegrees"
+
     // MARK: - Model list / stick figure
 
     /// The picker never mixes flavours: detection models when the skeleton toggle is off, pose models

@@ -12,7 +12,7 @@
 | 设备支持 | 仅 iPhone（`TARGETED_DEVICE_FAMILY: "1"`） | iPhone + iPad 原生（`"1,2"`），iPad 上不再是以兼容模式放大的手机界面 |
 | 窗口 | `UIRequiresFullScreen: true`，只声明竖屏 | 允许任意窗口尺寸，台前调度可自由拉伸；iPhone 竖/横，iPad 四方向 |
 | 布局 | 顶部 HUD + 底部面板，按"永远全屏"设计 | 竖屏 / 近方形窗口 = 手机布局；横屏 = 左下或右下**角部悬浮卡片**（宽 38%，340–460pt）+ 同宽 HUD，整组落在眼睛按钮的对面一侧 |
-| 画面方向 | `videoRotationAngle` 硬编码 90，只有竖屏正确 | `RotationCoordinator` 求角度对齐 90°，预览层与 `AVCaptureVideoDataOutput` 同角；内参按角度换算，换算失败退回 FOV 估算并在 HUD 标出 |
+| 画面方向 | `videoRotationAngle` 硬编码 90，只有竖屏正确 | 跟随**窗口的 interfaceOrientation**（UI 转对，画面就转对）；`RotationCoordinator` 降级为兜底；另提供「画面方向」手动档（自动/0/90/180/270），应对 LiveContainer 这类报错方向的容器 |
 | 缩放流畅度 | 每次 `layoutSubviews` 都可能重启采集管线 | 几何稳定 0.25 s 后再应用角度，且只在角度真变时写 connection |
 | 采集格式 | 固定 1080p@60 | 4K / 1080p / 720p / 480p × 24/30/60，只列设备真实支持（含 420 格式）的组合，选择记忆 |
 | 预览填充 | 固定 `.resizeAspectFill` | 填满 / 适配 可切换，检测框映射同步切换 |
@@ -32,10 +32,18 @@
 
 ### 相机与旋转
 
-原版把交付帧和预览层的旋转角都写死 90°，只对竖屏成立。本版用一个真源：`AVCaptureDevice.RotationCoordinator`
-同时驱动预览层与数据输出的 `videoRotationAngle`，于是 Vision（`.up`）、AprilTag 的亮度面、检测框映射
-三条链路自动一致，检测代码不受旋转影响。内参矩阵按 0/90/180/270 换算（原版只处理 90°），
-落在可疑范围时退回按视场角估算，HUD 会显示当前用的是哪条路径。
+原版把交付帧和预览层的旋转角都写死 90°，只对竖屏成立。本版先看**窗口自己的 interfaceOrientation**
+（UI 既然转对了，这个值一定对），映射沿用 AVCam 的后置相机表（竖屏 90°、左右横屏 180°/0°），
+同一个值同时写给 `previewLayer.connection` 和 `AVCaptureVideoDataOutput`，于是 Vision（`.up`）、
+AprilTag 的亮度面、检测框映射三条链路自动一致，检测代码不受旋转影响。
+
+`AVCaptureDevice.RotationCoordinator` 只作兜底：它按宿主设备的重力方向判断，在 LiveContainer
+这类容器里会把横窗报成竖屏（表现为 UI 横过来、画面还是竖条）。所以面板里另有一个「画面方向」
+手动档（自动 / 0 / 90 / 180 / 270），自动失灵时一键锁死角度。角度改动仍然走 0.15 s 去抖，
+而且每次 `layoutSubviews` 都重刷一次 `videoGravity`——旋转过的连接有时会把"填满"退化成"适配"。
+
+内参矩阵按 0/90/180/270 换算（原版只处理 90°），落在可疑范围时退回按视场角估算，
+HUD 会显示当前用的是哪条路径。
 
 采集格式从"预设 + 固定 60fps"改成按 `device.formats` 枚举（`CMFormatDescriptionGetMediaSubType`
 判 420f/420v，`AVCaptureDevice.Format` 没有 per-format 像素格式列表），切换走

@@ -15,6 +15,13 @@ struct ContentView: View {
 
     private var fillMode: PreviewFillMode { PreviewFillMode(rawValue: fillModeRaw) ?? .fill }
 
+    /// -1 = follow the window orientation, otherwise a locked right angle.
+    private static let rotationChoices = [-1, 0, 90, 180, 270]
+
+    private static func rotationTitle(_ value: Int) -> String {
+        value < 0 ? "自动（跟随窗口）" : "\(value)°"
+    }
+
     var body: some View {
         GeometryReader { geo in
             let landscape = geo.size.width > geo.size.height
@@ -111,6 +118,7 @@ struct ContentView: View {
                 session: viewModel.camera.session,
                 device: viewModel.device,
                 fillMode: fillMode,
+                forcedAngle: viewModel.forcedRotationAngle,
                 onRotationAngle: { viewModel.updateRotationAngle($0) }
             )
             DetectionOverlay(
@@ -294,6 +302,26 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 120)
+
+                // Escape hatch for containers that report the wrong orientation (LiveContainer does):
+                // auto follows the window, the rest lock a right angle.
+                Menu {
+                    ForEach(Self.rotationChoices, id: \.self) { value in
+                        Button {
+                            viewModel.rotationOverride = value
+                        } label: {
+                            if viewModel.rotationOverride == value {
+                                Label(Self.rotationTitle(value), systemImage: "checkmark")
+                            } else {
+                                Text(Self.rotationTitle(value))
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "rotate.right")
+                        .frame(width: 30)
+                }
+                .buttonStyle(.bordered)
             }
 
             HStack {
